@@ -206,11 +206,25 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
     if dyn_tariff_arb is None:
         dyn_tariff_arb=round(0.9*total_std*150*0.13)
     amort_arb,profit_arb=econ_combined(extra_self,price_std,dyn_tariff_arb,electricity_price)
-    total_savings_25=econ(neu['self'],0,electricity_price)[2]
     co2_factor=0.38
     co2_std=round(extra_self*co2_factor/10)*10
     co2_ent=round(extra_self_e*co2_factor/10)*10
     ml={"Schraegdach":"Schr\xe4gdach","Flachdach":"Flachdach/Aufst\xe4nderung"}[montage]
+
+    # Empfohlene Variante = h\xf6herer Gewinn \xfcber 25 Jahre (nicht pauschal die gr\xf6\xdfere Speicher-Variante)
+    std_wins=profit25>=profit25_e
+    n_batt_ent=round(total_ent/1.92)
+    reco_neu=neu if std_wins else nge
+    reco_total_battery=total_std if std_wins else total_ent
+    reco_n_batt=n_batt if std_wins else n_batt_ent
+    reco_price=price_std if std_wins else price_ent
+    reco_extra_self=extra_self if std_wins else extra_self_e
+    reco_extra_y1=extra_y1 if std_wins else extra_y1_e
+    reco_avg_extra_year=avg_extra_year if std_wins else avg_extra_year_e
+    reco_co2=co2_std if std_wins else co2_ent
+    reco_profit25=profit25 if std_wins else profit25_e
+    reco_title=f"{n_batt}\xd7 Akku" if std_wins else f"{n_batt_ent}\xd7 Akku"
+    total_savings_25=econ(reco_neu['self'],0,electricity_price)[2]
 
     out=out_path
     pdf=canvas.Canvas(out,pagesize=A4); tp=3
@@ -239,24 +253,24 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
 
     # Topologie
     y-=bh+8*mm; th=40*mm
-    draw_topology(pdf,20*mm,y-th,W-40*mm,th,added_modules,n_batt)
+    draw_topology(pdf,20*mm,y-th,W-40*mm,th,added_modules,reco_n_batt)
     y-=th
 
-    # KPI-Strip
+    # KPI-Strip (Zahlen der empfohlenen Variante, siehe Wirtschaftlichkeits-Vergleich S.3)
     y-=8*mm; kh=25*mm; kw=(W-40*mm-9*mm)/4
-    kpis=[("Autarkie",f"{ist['autarky']:.0f}% \u2192 {neu['autarky']:.0f}%",C_ACCENT_DARK),
-          ("Mehr-Eigenverbrauch",f"+{fmt(extra_self)} kWh/J",C_PRIMARY),
+    kpis=[("Autarkie",f"{ist['autarky']:.0f}% \u2192 {reco_neu['autarky']:.0f}%",C_ACCENT_DARK),
+          ("Mehr-Eigenverbrauch",f"+{fmt(reco_extra_self)} kWh/J",C_PRIMARY),
           ("__ERSPARNIS__",None,C_BLUE),
-          ("Zus\xe4tzl. Gewinn (25 J.)",f"+{fmt(profit25)} EUR",C_ACCENT_DARK)]
+          ("Zus\xe4tzl. Gewinn (25 J.)",f"+{fmt(reco_profit25)} EUR",C_ACCENT_DARK)]
     for i,(lab,val,col) in enumerate(kpis):
         bx=20*mm+i*(kw+3*mm)
         rrect(pdf,bx,y-kh,kw,kh,2*mm,C_BG_ACCENT,col)
         if lab=="__ERSPARNIS__":
             pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica",6.3); pdf.drawCentredString(bx+kw/2,y-6*mm,"Mehr-Ersparnis")
             pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica",6); pdf.drawString(bx+4*mm,y-13*mm,"1. Jahr")
-            pdf.setFillColor(col); pdf.setFont("Helvetica-Bold",9); pdf.drawRightString(bx+kw-4*mm,y-13*mm,f"+{fmt(extra_y1)} EUR")
+            pdf.setFillColor(col); pdf.setFont("Helvetica-Bold",9); pdf.drawRightString(bx+kw-4*mm,y-13*mm,f"+{fmt(reco_extra_y1)} EUR")
             pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica",6); pdf.drawString(bx+4*mm,y-19*mm,"\xd8 25 Jahre")
-            pdf.setFillColor(col); pdf.setFont("Helvetica-Bold",9); pdf.drawRightString(bx+kw-4*mm,y-19*mm,f"+{fmt(avg_extra_year)} EUR/J")
+            pdf.setFillColor(col); pdf.setFont("Helvetica-Bold",9); pdf.drawRightString(bx+kw-4*mm,y-19*mm,f"+{fmt(reco_avg_extra_year)} EUR/J")
         else:
             pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica",6.3); pdf.drawCentredString(bx+kw/2,y-6.5*mm,lab)
             pdf.setFillColor(col); pdf.setFont("Helvetica-Bold",12); pdf.drawCentredString(bx+kw/2,y-15.5*mm,val)
@@ -293,7 +307,7 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
           ("Intelligente Einspeisung","Smart Meter steuert die Abgabe lastgenau \u2013 kein Solarstrom wird mehr verschenkt."),
           ("Notstromfunktion","Bei Stromausfall versorgt die Off-Grid-Steckdose wichtige Ger\xe4te (bis 1000 W, < 20 ms)."),
           ("Bereit f\xfcr dynamische Tarife","Akku l\xe4dt bei g\xfcnstigen Preisen, entl\xe4dt bei teuren \u2013 zus\xe4tzliche Ersparnis."),
-          ("Aktiver Klimaschutz",f"Vermeidet rund {fmt(co2_std)} kg CO2 pro Jahr \u2013 sauberer Solarstrom statt Netzbezug.")]
+          ("Aktiver Klimaschutz",f"Vermeidet rund {fmt(reco_co2)} kg CO2 pro Jahr \u2013 sauberer Solarstrom statt Netzbezug.")]
     vy=y-11.5*mm
     for t,d in vben:
         _chk(27*mm,vy+0.5*mm)
@@ -309,13 +323,13 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
     pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica",7.5)
     pdf.drawString(20*mm,y,"Stundengenaue Simulation (8.760 h/a) mit Zwei-String-Topologie und 800-W-Ausgang"); y-=9*mm
 
-    rows=[("Module / Leistung",f"4\xd7 445 Wp ({ist['kwp']:.2f} kWp)",f"{target_modules}\xd7 445 Wp ({neu['kwp']:.2f} kWp)",False),
-          ("Speicher",f"{baseline_battery:.2f} kWh",f"{total_std:.2f} kWh",False),
+    rows=[("Module / Leistung",f"4\xd7 445 Wp ({ist['kwp']:.2f} kWp)",f"{target_modules}\xd7 445 Wp ({reco_neu['kwp']:.2f} kWp)",False),
+          ("Speicher",f"{baseline_battery:.2f} kWh",f"{reco_total_battery:.2f} kWh",False),
           ("Smart Meter / lastgef\xfchrt","Nein" if not smart_before else "Ja","Ja",False),
-          ("Jahresertrag (DC)",f"{fmt(ist['gen_dc'])} kWh",f"{fmt(neu['gen_dc'])} kWh",False),
-          ("Eigenverbrauch",f"{fmt(ist['self'])} kWh",f"{fmt(neu['self'])} kWh",True),
-          ("Autarkiegrad",f"{ist['autarky']:.0f}%",f"{neu['autarky']:.0f}%",True),
-          ("Netzbezug (Rest)",f"{fmt(ist['grid'])} kWh",f"{fmt(neu['grid'])} kWh",False)]
+          ("Jahresertrag (DC)",f"{fmt(ist['gen_dc'])} kWh",f"{fmt(reco_neu['gen_dc'])} kWh",False),
+          ("Eigenverbrauch",f"{fmt(ist['self'])} kWh",f"{fmt(reco_neu['self'])} kWh",True),
+          ("Autarkiegrad",f"{ist['autarky']:.0f}%",f"{reco_neu['autarky']:.0f}%",True),
+          ("Netzbezug (Rest)",f"{fmt(ist['grid'])} kWh",f"{fmt(reco_neu['grid'])} kWh",False)]
     tx=20*mm; cw=[58*mm,46*mm,46*mm]; rh=7*mm
     pdf.setFillColor(C_PRIMARY); pdf.rect(tx,y,sum(cw),rh,fill=1,stroke=0)
     pdf.setFillColor(C_WHITE); pdf.setFont("Helvetica-Bold",7)
@@ -347,7 +361,7 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
     # Monatschart
     y-=10*mm; ch=40*mm
     pdf.setFillColor(C_DARK); pdf.setFont("Helvetica-Bold",8); pdf.drawString(20*mm,y,"Monatlicher Eigenverbrauch (kWh)")
-    draw_month_bars(pdf,30*mm,y-5*mm-ch,W-50*mm,ch,ist,neu)
+    draw_month_bars(pdf,30*mm,y-5*mm-ch,W-50*mm,ch,ist,reco_neu)
     pdf.showPage()
 
     # ===== SEITE 3 =====
@@ -366,13 +380,14 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
     pdf.drawString(26*mm,y-8.8*mm,f"Wert {action_registration} EUR \u2013 f\xfcr Bestandskunden kostenfrei. Die Aktionspreise unten enthalten den Vorteil bereits.")
     y-=ah+8*mm
 
-    # Zwei Varianten-Karten (Gut / Besser)
+    # Zwei Varianten-Karten – \"EMPFOHLEN\" erh\xe4lt, wer in 25 Jahren den h\xf6heren Gewinn bringt
     cw=(W-40*mm-6*mm)/2; chh=51*mm
-    variants=[("EMPFOHLEN","Standard",f"+ {added_modules} Module + {add_ab2000_std}\xd7 1,92 kWh Speicher + Smart Meter",
-               upgrade_price,price_std,neu['autarky'],extra_y1,avg_extra_year,co2_std,profit25,C_PRIMARY,True),
-              (None,"Einstieg",f"+ {added_modules} Module + {add_ab2000_ent}\xd7 1,92 kWh Speicher + Smart Meter",
-               entry_price,price_ent,nge['autarky'],extra_y1_e,avg_extra_year_e,co2_ent,profit25_e,C_BLUE,False)]
-    for i,(badge,title,sub,lst,act,aut,y1,avg,co,pf,col,reco) in enumerate(variants):
+    variants=[(std_wins,f"{n_batt}\xd7 Akku",f"+ {added_modules} Module + {add_ab2000_std}\xd7 1,92 kWh Speicher + Smart Meter",
+               upgrade_price,price_std,neu['autarky'],extra_y1,avg_extra_year,co2_std,profit25,C_PRIMARY),
+              (not std_wins,f"{n_batt_ent}\xd7 Akku",f"+ {added_modules} Module + {add_ab2000_ent}\xd7 1,92 kWh Speicher + Smart Meter",
+               entry_price,price_ent,nge['autarky'],extra_y1_e,avg_extra_year_e,co2_ent,profit25_e,C_BLUE)]
+    for i,(reco,title,sub,lst,act,aut,y1,avg,co,pf,col) in enumerate(variants):
+        badge="MEHR GEWINN" if reco else None
         bx=20*mm+i*(cw+6*mm)
         rrect(pdf,bx,y-chh,cw,chh,3*mm,C_BG_ACCENT if reco else C_WHITE,col)
         if badge:
@@ -407,9 +422,9 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
     rrect(pdf,20*mm,y-rh2,W-40*mm,rh2,4*mm,C_PRIMARY)
     pdf.setFillColor(C_WHITE); pdf.setFont("Helvetica-Bold",10); pdf.drawString(28*mm,y-7*mm,"Unsere Empfehlung")
     pdf.setFillColor(C_ACCENT); pdf.setFont("Helvetica-Bold",8)
-    pdf.drawString(28*mm,y-14*mm,f"Standard-Paket: {ist['autarky']:.0f}% \u2192 {neu['autarky']:.0f}% Autarkie f\xfcr {fmt(price_std)} EUR (Aktion)")
+    pdf.drawString(28*mm,y-14*mm,f"{reco_title}: {ist['autarky']:.0f}% \u2192 {reco_neu['autarky']:.0f}% Autarkie f\xfcr {fmt(reco_price)} EUR (Aktion)")
     pdf.setFillColor(C_WHITE); pdf.setFont("Helvetica",7.5)
-    pdf.drawString(28*mm,y-20*mm,f"+{fmt(extra_self)} kWh/Jahr mehr Eigenverbrauch, +{fmt(profit25)} EUR Gewinn in 25 Jahren \u2013 dazu")
+    pdf.drawString(28*mm,y-20*mm,f"+{fmt(reco_extra_self)} kWh/Jahr mehr Eigenverbrauch, +{fmt(reco_profit25)} EUR Gewinn in 25 Jahren \u2013 dazu")
     pdf.drawString(28*mm,y-24.5*mm,"Notstrom, intelligente Einspeisung und die Basis f\xfcr dynamische Tarife.")
     y-=rh2+6*mm
 
@@ -429,8 +444,10 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
         pdf.drawString(20*mm,y,ln); y-=3*mm
     pdf.save()
 
-    print(f"OK: {customer['name']}, {cons} kWh | IST Aut {ist['autarky']}% / NEU {neu['autarky']}% | "
-          f"+{extra_self} kWh, +{extra_y1} EUR/J | Amort {amort} J | Gewinn25 +{profit25} EUR | Abregel NEU {neu['curt']}")
+    print(f"OK: {customer['name']}, {cons} kWh | empfohlen: {reco_title} ({'Standard' if std_wins else 'Einstieg'}) | "
+          f"IST Aut {ist['autarky']}% / NEU {reco_neu['autarky']}% | "
+          f"+{reco_extra_self} kWh, +{reco_extra_y1} EUR/J | Gewinn25 +{reco_profit25} EUR "
+          f"(Standard +{profit25} EUR vs. Einstieg +{profit25_e} EUR) | Abregel NEU {reco_neu['curt']}")
     return out
 
 if __name__=="__main__":
