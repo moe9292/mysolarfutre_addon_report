@@ -188,6 +188,9 @@ def generate_upgrade_report(customer, baseline_battery=1.92, target_modules=8,
                             dyn_tariff_arb=None, out_path="upgrade_bericht.pdf"):
     bif=BIFACIAL[montage]; cons=customer["consumption"]
     added_modules=target_modules-4
+    # upgrade_price/entry_price gelten als 8-Modul-Preise; 6-Modul-Upgrade ist je 1.000 EUR günstiger
+    if target_modules==6:
+        upgrade_price-=1000; entry_price-=1000
     add_ab2000_std=max(1,add_ab2000_std); add_ab2000_ent=max(1,add_ab2000_ent)  # min. 1 (SolarFlow)
     total_std=baseline_battery+add_ab2000_std*1.92
     total_ent=baseline_battery+add_ab2000_ent*1.92
