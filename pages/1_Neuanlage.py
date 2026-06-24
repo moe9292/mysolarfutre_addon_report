@@ -30,19 +30,32 @@ st.caption("Erstellt einen Solar-Empfehlungsbericht (Paketauswahl, Wirtschaftlic
 with st.form("neuanlage_form"):
     st.subheader("Kundendaten")
     c1, c2, c3 = st.columns(3)
-    name = c1.text_input("Name", "Max Mustermann")
-    street = c2.text_input("Straße & Nr.", "Musterstr. 5")
-    city = c3.text_input("PLZ & Ort", "27755 Delmenhorst")
+    anrede = c1.selectbox("Anrede", ["Herr", "Frau"], index=0)
+    name = c2.text_input("Vor- und Nachname", "Max Mustermann")
+    street = c3.text_input("Straße & Nr.", "Musterstr. 5")
+    c1, c2 = st.columns(2)
+    city = c1.text_input("PLZ & Ort", "27755 Delmenhorst")
+    consumption = c2.number_input("Jahresverbrauch (kWh)", 500, 20000, 4000, step=100)
+
     c1, c2, c3 = st.columns(3)
-    consumption = c1.number_input("Jahresverbrauch (kWh)", 500, 20000, 4000, step=100)
-    orientation = c2.selectbox("Ausrichtung",
+    orientation = c1.selectbox("Ausrichtung",
                                ["Süd", "Südost", "Südwest", "Ost", "West", "Ost-West"])
-    montage_label = c3.selectbox("Montageart", ["Schrägdach", "Flachdach", "Balkon"])
+    montage_label = c2.selectbox("Montageart", ["Schrägdach", "Flachdach", "Balkon"])
     montage = {"Schrägdach": "Schraegdach", "Flachdach": "Flachdach", "Balkon": "Balkon"}[montage_label]
     report_type = "balkon" if montage_label == "Balkon" else "dach"
+    electricity_price_ct = c3.number_input("Strompreis (ct/kWh)", 20.0, 60.0, 36.0, step=0.5,
+                                           help="Aktueller Strompreis des Kunden")
+
+    max_modules_label = st.selectbox(
+        "Max. Modulanzahl (Dachanlage)",
+        ["Keine Begrenzung", "4 Module", "6 Module"],
+        index=0,
+        help="Begrenzt durch Dachfläche - gilt nur für Dachanlagen",
+    )
+    max_modules_map = {"Keine Begrenzung": None, "4 Module": 4, "6 Module": 6}
 
     st.caption(
-        "Dachanlage: automatische Paketauswahl (Solar Smart/Smart+/Pro/Pro+) je nach Jahresverbrauch.  ·  "
+        "Dachanlage: automatische Paketauswahl (Solar Smart/Smart+/Pro/Max/Max+) je nach Jahresverbrauch.  ·  "
         "Balkon: feste Paketauswahl Solar Balkon / Balkon+ (2 Module, max. 800 W)."
     )
 
@@ -57,11 +70,13 @@ if submitted:
         out_path = tf.name
     try:
         generate_report(
-            customer={"name": name, "street": street, "city": city,
+            customer={"name": f"{anrede} {name.strip()}", "street": street, "city": city,
                       "consumption": int(consumption), "orientation": orientation},
             montage=montage,
             report_type=report_type,
-            out_path=out_path,
+            electricity_price=electricity_price_ct / 100,
+            max_modules=max_modules_map[max_modules_label],
+            output_path=out_path,
         )
     except Exception as e:
         st.error(f"Fehler beim Erstellen: {e}")

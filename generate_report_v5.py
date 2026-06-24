@@ -29,8 +29,9 @@ W, H = A4
 CATALOG_DACH = [
     {"id": "smart",  "label": "Solar Smart",  "modules": 4, "battery": 1.92, "cost": 3499, "fit": 0.0},
     {"id": "smart+", "label": "Solar Smart+", "modules": 4, "battery": 3.84, "cost": 4099, "fit": 0.0},
-    {"id": "pro",    "label": "Solar Pro",    "modules": 8, "battery": 2.70, "cost": 6899, "fit": 0.0778},
-    {"id": "pro+",   "label": "Solar Pro+",   "modules": 8, "battery": 5.40, "cost": 7699, "fit": 0.0778},
+    {"id": "pro",    "label": "Solar Pro",    "modules": 6, "battery": 2.70, "cost": 5899, "fit": 0.0778},
+    {"id": "max",    "label": "Solar Max",    "modules": 8, "battery": 2.70, "cost": 6899, "fit": 0.0778},
+    {"id": "max+",   "label": "Solar Max+",   "modules": 8, "battery": 5.40, "cost": 7699, "fit": 0.0778},
 ]
 
 CATALOG_BALKON = [
@@ -39,23 +40,33 @@ CATALOG_BALKON = [
 ]
 
 # Selection: pick 3 from CATALOG_DACH based on consumption
-def select_packages(annual_consumption):
-    if annual_consumption <= 2500:
+# Always include at least one of Smart/Smart+
+def select_packages(annual_consumption, max_modules=None):
+    # Filter by max_modules if set
+    available = CATALOG_DACH
+    if max_modules:
+        available = [p for p in available if p["modules"] <= max_modules]
+        ids = [p["id"] for p in available]
+        return ids[:3]  # return up to 3
+
+    if annual_consumption <= 2000:
         return ["smart", "smart+", "pro"]
+    elif annual_consumption <= 3000:
+        return ["smart+", "pro", "max"]
     else:
-        return ["smart+", "pro", "pro+"]
+        return ["smart+", "max", "max+"]
 
 BIFACIAL = {"Schraegdach": 1.03, "Flachdach": 1.08, "Balkon": 1.07}
 
 # ─── SOLAR DATA ──────────────────────────────────────────────────────
-MONTHLY_DAILY_KWH_PER_KWP = [0.7, 1.2, 2.3, 3.5, 4.2, 4.5, 4.3, 3.8, 2.8, 1.6, 0.8, 0.5]
+MONTHLY_DAILY_KWH_PER_KWP = [0.7, 1.2, 2.4, 3.6, 4.3, 4.6, 4.4, 4.0, 2.95, 1.7, 0.8, 0.5]
 SOLAR_SHAPE = [
     0, 0, 0, 0, 0, 0.02, 0.05, 0.08, 0.10, 0.12, 0.13, 0.13,
     0.12, 0.11, 0.09, 0.06, 0.04, 0.02, 0.01, 0, 0, 0, 0, 0
 ]
 LOAD_SHAPE = [
-    0.022, 0.018, 0.016, 0.015, 0.015, 0.018, 0.035, 0.055, 0.052, 0.045, 0.042, 0.044,
-    0.055, 0.048, 0.040, 0.038, 0.042, 0.058, 0.072, 0.068, 0.062, 0.055, 0.045, 0.032
+    0.022, 0.018, 0.016, 0.015, 0.015, 0.018, 0.035, 0.052, 0.050, 0.048, 0.050, 0.052,
+    0.058, 0.052, 0.048, 0.045, 0.048, 0.055, 0.065, 0.062, 0.058, 0.050, 0.042, 0.030
 ]
 MONTHLY_LOAD_FACTOR = [1.15, 1.10, 1.02, 0.95, 0.88, 0.82, 0.80, 0.82, 0.90, 1.00, 1.10, 1.18]
 DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
@@ -67,14 +78,14 @@ MONTH_NAMES = ["Jan", "Feb", "M\xe4r", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep",
 def simulate(module_count, module_wp, battery_kwh, max_inverter_w,
              annual_consumption, electricity_price, feed_in_tariff,
              system_cost, bifacial_gain=1.0,
-             degradation_rate=0.005, price_increase_rate=0.025):
+             degradation_rate=0.004, price_increase_rate=0.025):
 
     total_kwp = (module_count * module_wp) / 1000
-    system_eff = 0.95       # 2% cable + 3% soiling
+    system_eff = 0.965      # 1% cable + 2.5% soiling
     inverter_eff = 0.96
-    charge_eff = 0.95
-    discharge_eff = 0.95
-    min_soc = battery_kwh * 0.10 if battery_kwh > 0 else 0
+    charge_eff = 0.96       # Zendure GaN DC-coupled
+    discharge_eff = 0.96
+    min_soc = battery_kwh * 0.05 if battery_kwh > 0 else 0
     max_inv_ac = max_inverter_w / 1000
 
     solar_shape_sum = sum(SOLAR_SHAPE)
@@ -85,6 +96,16 @@ def simulate(module_count, module_wp, battery_kwh, max_inverter_w,
     CLEAR_FRAC = 0.40
     CLEAR_MULT = 1.45
     CLOUDY_MULT = 0.70
+
+    # Stundenbasierte Peak-Korrektur: Anteil des Eigenverbrauchs, der in der Realität
+    # durch kurzfristige Lastspitzen (>800W) aus dem Netz bezogen wird.
+    # Nur in Stunden mit typischen Großverbrauchern (Kochen, Wasserkocher, Fön).
+    PEAK_CORR = [
+    #   0     1     2     3     4     5     6     7     8     9    10    11
+        0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.05, 0.08, 0.00, 0.00, 0.00, 0.05,
+    #  12    13    14    15    16    17    18    19    20    21    22    23
+        0.12, 0.05, 0.00, 0.00, 0.00, 0.08, 0.12, 0.08, 0.04, 0.00, 0.00, 0.00,
+    ]
 
     soc = battery_kwh * 0.15 if battery_kwh > 0 else 0
     T = {k: 0.0 for k in ['gen_dc','self_ac','feed_ac','grid_ac','curt_dc','batt_in_dc','batt_out_dc']}
@@ -105,6 +126,7 @@ def simulate(module_count, module_wp, battery_kwh, max_inverter_w,
                     pv_dc = daily_dc * norm_solar[h]
                     load_ac = daily_load_ac * (LOAD_SHAPE[h] / load_shape_sum)
                     T['gen_dc'] += pv_dc; M['gen_dc'] += pv_dc
+                    prev_self = T['self_ac']
 
                     if battery_kwh > 0:
                         space = max(0, (battery_kwh - soc) / charge_eff)
@@ -153,6 +175,15 @@ def simulate(module_count, module_wp, battery_kwh, max_inverter_w,
                         T['feed_ac'] += to_grid; M['feed_ac'] += to_grid
                         T['curt_dc'] += curtailed; M['curt_dc'] += curtailed
                         T['grid_ac'] += remaining; M['grid_ac'] += remaining
+
+                    # Stündliche Peak-Korrektur anwenden
+                    pc = PEAK_CORR[h]
+                    if pc > 0:
+                        hour_self = T['self_ac'] - prev_self
+                        shift = hour_self * pc
+                        if shift > 0:
+                            T['self_ac'] -= shift; M['self_ac'] -= shift
+                            T['grid_ac'] += shift; M['grid_ac'] += shift
 
         monthly.append(M)
 
@@ -203,7 +234,7 @@ def draw_footer(c):
     c.setFillColor(C_LIGHT); c.rect(0, 0, W, 12*mm, fill=1, stroke=0)
     c.setFillColor(C_GRAY); c.setFont("Helvetica", 6.5)
     c.drawString(20*mm, 5*mm, "Green Circuits GmbH  \xb7  kontakt@mysolarfuture.de  \xb7  www.mysolarfuture.de")
-    c.drawRightString(W-20*mm, 5*mm, "PVGIS NW-DE  \xb7  Lastprofil H0  \xb7  Angaben ohne Gew\xe4hr")
+    c.drawRightString(W-20*mm, 5*mm, "950 kWh/kWp (VZ Bremen)  \xb7  Lastprofil H0  \xb7  Angaben ohne Gew\xe4hr")
 
 def rrect(c, x, y, w, h, r, fill, stroke=None):
     c.saveState(); c.setFillColor(fill)
@@ -236,18 +267,18 @@ def draw_badge(c, x, y, label, modules, battery, cost, color, badge_text=None):
 def draw_table(c, x, y, configs, labels, colors):
     rows = [
         ("Anlagenleistung", [f"{cfg['kwp']:.2f} kWp" for cfg in configs], False),
-        ("Speicher", [f"{cfg['battery']:.2f} kWh" if cfg['battery'] > 0 else "\u2013" for cfg in configs], False),
+        ("Speicher", [f"{cfg['battery']:.2f} kWh" if cfg['battery'] > 0 else "–" for cfg in configs], False),
         ("Jahresertrag (DC)", [f"{fmt(cfg['gen_dc'])} kWh" for cfg in configs], False),
         ("Eigenverbrauch", [f"{fmt(cfg['self_ac'])} kWh" for cfg in configs], True),
         ("Autarkiegrad", [f"{cfg['autarky']}%" for cfg in configs], True),
         ("Netzeinspeisung", [f"{fmt(cfg['feed_ac'])} kWh" for cfg in configs], False),
         ("Abregelung (Verlust)", [f"{fmt(cfg['curt_dc'])} kWh" for cfg in configs], False),
         ("Restbezug Netz", [f"{fmt(cfg['grid_ac'])} kWh" for cfg in configs], False),
-        ("Einspeiseverg\xfctung", [f"{cfg['feed_in_tariff']*100:.2f} ct/kWh" if cfg['feed_in_tariff'] > 0 else "\u2013" for cfg in configs], False),
+        ("Einspeiseverg\xfctung", [f"{cfg['feed_in_tariff']*100:.2f} ct/kWh" if cfg['feed_in_tariff'] > 0 else "–" for cfg in configs], False),
         ("SEP", None, False),
         ("Investitionskosten", [f"{fmt(cfg['cost'])} EUR" for cfg in configs], False),
-        ("Ersparnis \xd8/Jahr (25 J.)", [f"{fmt(cfg['avg_savings_25'])} EUR" for cfg in configs], False),
-        ("Amortisationszeit", [f"{cfg['amort']} Jahre" if cfg['amort'] else "> 25 J." for cfg in configs], True),
+        ("Amortisationszeit", [f"{cfg['amort']} Jahre" if cfg['amort'] else "> 25 J." for cfg in configs], False),
+        ("Ersparnis \xd8/Jahr (25 J.)", [f"{fmt(cfg['avg_savings_25'])} EUR" for cfg in configs], True),
         ("Gewinn 25 Jahre", [f"+{fmt(cfg['profit_25'])} EUR" for cfg in configs], True),
     ]
     col_w = [48*mm] + [38*mm]*len(configs)
@@ -282,8 +313,13 @@ def draw_table(c, x, y, configs, labels, colors):
 
 
 def draw_bars(c, x, y, w, h, configs, labels, colors):
-    max_val = max(max(d['self_ac'] for d in cfg['monthly']) for cfg in configs) * 1.15
-    gw = w/12; bw = gw/(len(configs)+1)
+    # Monthly consumption (same for all configs) = self_ac + grid_ac
+    consumption = [configs[0]['monthly'][mi]['self_ac'] + configs[0]['monthly'][mi]['grid_ac'] for mi in range(12)]
+    max_self = max(max(d['self_ac'] for d in cfg['monthly']) for cfg in configs)
+    max_val = max(max(consumption), max_self) * 1.15
+    n_bars = len(configs) + 1  # +1 for consumption bar
+    gw = w/12; bw = gw/n_bars
+    C_CONSUMPTION = HexColor("#F5A623")  # gold/orange
     c.setStrokeColor(HexColor("#E5E7EB")); c.setLineWidth(0.2)
     for f in [0, 0.25, 0.5, 0.75, 1.0]:
         gy = y+f*h; c.line(x, gy, x+w, gy)
@@ -293,13 +329,26 @@ def draw_bars(c, x, y, w, h, configs, labels, colors):
         gx = x+mi*gw
         c.setFillColor(C_GRAY); c.setFont("Helvetica", 5)
         c.drawCentredString(gx+gw/2, y-3.5*mm, MONTH_NAMES[mi])
+        # Consumption bar first (leftmost)
+        con_val = consumption[mi]
+        con_h = (con_val/max_val)*h if max_val > 0 else 0
+        bx_con = gx + bw*0.15
+        c.setFillColor(C_CONSUMPTION)
+        if con_h > 0: c.rect(bx_con, y, bw*0.75, con_h, fill=1, stroke=0)
+        # Then config bars
         for ci, cfg in enumerate(configs):
             val = cfg['monthly'][mi]['self_ac']
             bh_bar = (val/max_val)*h if max_val > 0 else 0
-            bx = gx+ci*bw+bw*0.15
+            bx = gx+(ci+1)*bw+bw*0.15
             c.setFillColor(colors[ci])
             if bh_bar > 0: c.rect(bx, y, bw*0.75, bh_bar, fill=1, stroke=0)
+    # Legend
     ly = y-8*mm; lx = x
+    # Consumption legend entry first
+    c.setFillColor(C_CONSUMPTION); c.rect(lx, ly, 3*mm, 2.5*mm, fill=1, stroke=0)
+    c.setFillColor(C_GRAY); c.setFont("Helvetica", 6)
+    c.drawString(lx+4*mm, ly+0.3*mm, "Verbrauch")
+    lx += c.stringWidth("Verbrauch", "Helvetica", 6)+10*mm
     for i in range(len(configs)):
         c.setFillColor(colors[i]); c.rect(lx, ly, 3*mm, 2.5*mm, fill=1, stroke=0)
         c.setFillColor(C_GRAY); c.setFont("Helvetica", 6)
@@ -357,15 +406,30 @@ def draw_amort(c, x, y, w, h, configs, labels, colors):
 
 # ═══════════════════════════════════════════════════════════════════════
 
-def generate_report(customer, montage="Schraegdach", report_type="dach", out_path="solar_bericht_v5.pdf"):
+def generate_report(customer, montage="Schraegdach", report_type="dach", electricity_price=0.36, max_modules=None, output_path=None):
     """
     customer: dict with name, street, city, consumption, orientation
     montage: "Schraegdach" | "Flachdach" | "Balkon"
     report_type: "dach" | "balkon"
+    electricity_price: EUR/kWh (default 0.36)
+    max_modules: max number of modules that fit on the roof (optional)
+    output_path: path for PDF output (default: /home/claude/solar_bericht_v5.pdf)
     """
-    electricity_price = 0.34
-    price_increase = 0.025
+    price_increase = 0.035
     bifacial_gain = BIFACIAL[montage]
+
+    # Parse salutation from name (e.g. "Frau Karin Kuhl" → anrede="Frau", display name="Karin Kuhl")
+    raw_name = customer["name"].strip()
+    if raw_name.lower().startswith("frau "):
+        anrede = "Sehr geehrte Frau"
+        display_name = raw_name[5:].strip()
+    elif raw_name.lower().startswith("herr "):
+        anrede = "Sehr geehrter Herr"
+        display_name = raw_name[5:].strip()
+    else:
+        anrede = "Sehr geehrte/r Herr/Frau"
+        display_name = raw_name
+    customer_lastname = display_name.split()[-1]
 
     # Select catalog & packages
     if report_type == "balkon":
@@ -373,7 +437,7 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
         selected_ids = [c["id"] for c in catalog]
     else:
         catalog = CATALOG_DACH
-        selected_ids = select_packages(customer["consumption"])
+        selected_ids = select_packages(customer["consumption"], max_modules=max_modules)
 
     # Simulate selected configs
     configs = []
@@ -397,36 +461,52 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
     labels = [c["label"] for c in configs]
     colors = [C_ACCENT_DARK, C_PRIMARY, C_BLUE][:len(configs)]
 
-    # Recommendations
+    # Recommendations: single recommendation
+    # Default: P/L winner (best profit/cost ratio)
+    # Upgrade to larger package only if it has ≥2.500€ MORE profit than P/L winner
     pl_scores = [cfg["profit_25"]/cfg["cost"] if cfg["profit_25"] > 0 else 0 for cfg in configs]
     pl_idx = pl_scores.index(max(pl_scores))
     profits = [cfg["profit_25"] for cfg in configs]
-    mx_idx = profits.index(max(profits))
-    show_max = (mx_idx != pl_idx and (profits[mx_idx]-profits[pl_idx]) >= 3500)
-    badges = {pl_idx: "PREIS-LEISTUNGS-SIEGER"}
-    if show_max: badges[mx_idx] = "MAXIMALE ERSPARNIS"
+
+    rec_idx = pl_idx
+    for i in range(len(configs) - 1, -1, -1):
+        if i != pl_idx and (profits[i] - profits[pl_idx]) >= 2500:
+            rec_idx = i
+            break
+
+    # Speicher-Downgrade: wenn empfohlenes Paket ein "Speicher-Geschwister" hat
+    # (gleiche Modulzahl, kleinerer Speicher) und der Mehrgewinn <1.000€ ist,
+    # dann das kleinere Speicher-Paket empfehlen (Speichertausch nach 10-15 J. wahrscheinlich)
+    rec_cfg = configs[rec_idx]
+    for i, cfg in enumerate(configs):
+        if i != rec_idx and cfg["modules"] == rec_cfg["modules"] and cfg["battery"] < rec_cfg["battery"]:
+            if (profits[rec_idx] - profits[i]) < 1000:
+                rec_idx = i
+                break
+
+    badges = {rec_idx: "UNSERE EMPFEHLUNG"}
 
     montage_labels = {"Schraegdach": "Schr\xe4gdach", "Flachdach": "Flachdach/Aufst\xe4nderung", "Balkon": "Balkon"}
     ml = montage_labels[montage]
 
     # Speicher-Erweiterungshinweis
     has_4mod = any(c["modules"] == 4 for c in configs)
-    has_8mod = any(c["modules"] == 8 for c in configs)
+    has_6plus = any(c["modules"] >= 6 for c in configs)
     speicher_hint_parts = []
     if has_4mod: speicher_hint_parts.append("4-Modul = 1,92 kWh-Bl\xf6cke")
-    if has_8mod: speicher_hint_parts.append("8-Modul = 2,7 kWh-Bl\xf6cke")
+    if has_6plus: speicher_hint_parts.append("6/8-Modul = 2,7 kWh-Bl\xf6cke")
     speicher_hint = "Speicher erweiterbar: " + "  \xb7  ".join(speicher_hint_parts) if speicher_hint_parts else ""
 
     # BKW/EEG hint
     has_bkw = any(c["modules"] <= 4 for c in configs)
     has_eeg = any(c["modules"] > 4 for c in configs)
     vergutung_parts = []
-    if has_bkw: vergutung_parts.append("BKW (\u22644 Module): keine Einspeiseverg\xfctung")
-    if has_eeg: vergutung_parts.append(f"Registrierte PV (8 Module): {configs[-1]['feed_in_tariff']*100:.2f} ct/kWh EEG")
+    if has_bkw: vergutung_parts.append("BKW (≤4 Module): keine Einspeiseverg\xfctung")
+    if has_eeg: vergutung_parts.append(f"Registrierte PV (>4 Module): {configs[-1]['feed_in_tariff']*100:.2f} ct/kWh EEG")
     vergutung_hint = "  \xb7  ".join(vergutung_parts)
 
     # ─── PDF ─────────────────────────────────────────────────────────
-    out = out_path
+    out = output_path or "/home/claude/solar_bericht_v5.pdf"
     pdf = canvas.Canvas(out, pagesize=A4)
     tp = 3
 
@@ -446,7 +526,7 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
     pdf.setFillColor(C_PRIMARY); pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(26*mm, y-5*mm, "Objektdaten")
     pdf.setFillColor(C_DARK); pdf.setFont("Helvetica", 8)
-    pdf.drawString(26*mm, y-12*mm, f"Eigent\xfcmer:  {customer['name']}")
+    pdf.drawString(26*mm, y-12*mm, f"Eigent\xfcmer:  {display_name}")
     pdf.drawString(26*mm, y-18*mm, f"Adresse:  {customer['street']}, {customer['city']}")
     pdf.drawString(110*mm, y-12*mm, f"Jahresverbrauch:  {fmt(customer['consumption'])} kWh")
     pdf.drawString(110*mm, y-18*mm, f"Dachausrichtung:  {customer['orientation']}")
@@ -474,15 +554,15 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
     # Intro
     y -= 16*mm; pdf.setFillColor(C_DARK); pdf.setFont("Helvetica", 8)
     for line in [
-        f"Sehr geehrter Herr {customer['name'].split()[-1]},",
+        f"{anrede} {customer_lastname},",
         "",
         f"f\xfcr Ihren Jahresverbrauch von {fmt(customer['consumption'])} kWh und {customer['orientation']}-",
         f"Ausrichtung haben wir die passenden Konfigurationen stundengenau simuliert (8.760 h/a).",
         f"Alle Systeme nutzen einen 800-W-Microinverter mit Smart-Meter-Steuerung",
         f"und Bifazialmodule (+{(bifacial_gain-1)*100:.0f}% Mehrertrag bei {ml}).",
         "",
-        "Verlustannahmen: 2% Kabelverluste, 3% Verschmutzung (PR 95%).",
-        f"Strompreissteigerung: {price_increase*100:.1f}% p.a. (Inflationsdurchschnitt DE).",
+        "Verlustannahmen: 1% Kabelverluste, 2,5% Verschmutzung (PR 96,5%).",
+        f"Strompreissteigerung: {price_increase*100:.1f}% p.a. (historischer Durchschnitt DE, 2010–2024).",
     ]:
         pdf.drawString(20*mm, y, line); y -= 4*mm
 
@@ -493,10 +573,10 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
     pdf.drawString(26*mm, y-7*mm, "Auf einen Blick")
     pdf.setFillColor(C_DARK); pdf.setFont("Helvetica", 8)
     no_pv = customer["consumption"] * electricity_price
-    pl = configs[pl_idx]
+    rec = configs[rec_idx]
     pdf.drawString(26*mm, y-15*mm, f"Ohne Solar: ca. {fmt(no_pv)} EUR/Jahr Stromkosten.")
-    pdf.drawString(26*mm, y-22*mm, f"Mit {labels[pl_idx]}: \xd8 {fmt(pl['avg_savings_25'])} EUR Ersparnis/Jahr,")
-    pdf.drawString(26*mm, y-28*mm, f"Amortisation in {pl['amort']} Jahren, +{fmt(pl['profit_25'])} EUR Gewinn in 25 Jahren.")
+    pdf.drawString(26*mm, y-22*mm, f"Mit {labels[rec_idx]}: \xd8 {fmt(rec['avg_savings_25'])} EUR Ersparnis/Jahr,")
+    pdf.drawString(26*mm, y-28*mm, f"Amortisation in {rec['amort']} Jahren, +{fmt(rec['profit_25'])} EUR Gewinn in 25 Jahren.")
     pdf.showPage()
 
     # ═══ PAGE 2 ═══
@@ -521,7 +601,7 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
 
     y -= 8*mm; ch = 42*mm
     pdf.setFillColor(C_DARK); pdf.setFont("Helvetica-Bold", 8)
-    pdf.drawString(20*mm, y, "Monatlicher Eigenverbrauch (kWh)")
+    pdf.drawString(20*mm, y, "Monatlicher Verbrauch vs. Eigenverbrauch (kWh)")
     cb = y - 5*mm - ch
     draw_bars(pdf, 30*mm, cb, W-50*mm, ch, configs, labels, colors)
     y = cb - 12*mm
@@ -546,7 +626,7 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
     pdf.drawString(20*mm, y, "Wirtschaftlichkeit & Empfehlung"); y -= 10*mm
     draw_amort(pdf, 30*mm, y-55*mm, W-52*mm, 50*mm, configs, labels, colors)
 
-    y -= 74*mm; bw = (W-40*mm-8*mm)/3
+    y -= 74*mm; nc = len(configs); bw = (W-40*mm-(nc-1)*4*mm)/nc
     for i, cfg in enumerate(configs):
         bx = 20*mm+i*(bw+4*mm); bh_box = 28*mm
         rrect(pdf, bx, y-bh_box, bw, bh_box, 3*mm, C_BG_ACCENT if i in badges else C_WHITE, colors[i])
@@ -562,26 +642,44 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
         pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica", 5.5)
         pdf.drawCentredString(bx+bw/2, y-25.5*mm, "Gewinn in 25 Jahren")
 
-    y -= 40*mm; rh = 48*mm if show_max else 34*mm
+    y -= 40*mm; rh = 34*mm
     rrect(pdf, 20*mm, y-rh, W-40*mm, rh, 4*mm, C_PRIMARY)
     pdf.setFillColor(C_WHITE); pdf.setFont("Helvetica-Bold", 11)
     pdf.drawString(28*mm, y-8*mm, "Unsere Empfehlung"); ty = y-17*mm
-    pc = configs[pl_idx]
+    pc = configs[rec_idx]
     pdf.setFillColor(C_ACCENT); pdf.setFont("Helvetica-Bold", 8)
-    pdf.drawString(28*mm, ty, f"Preis-Leistungs-Sieger: {labels[pl_idx]}"); ty -= 5*mm
+    pdf.drawString(28*mm, ty, f"{labels[rec_idx]}"); ty -= 5*mm
     pdf.setFillColor(C_WHITE); pdf.setFont("Helvetica", 7.5)
     pdf.drawString(28*mm, ty, f"{fmt(pc['cost'])} EUR Invest, +{fmt(pc['profit_25'])} EUR Gewinn in 25 J."); ty -= 4.5*mm
     pdf.drawString(28*mm, ty, f"Amortisation {pc['amort']} J., {pc['autarky']}% Autarkie, \xd8 {fmt(pc['avg_savings_25'])} EUR/J. Ersparnis.")
-    if show_max:
-        ty -= 9*mm; mc = configs[mx_idx]; delta = mc['profit_25']-pc['profit_25']
-        pdf.setFillColor(C_ACCENT); pdf.setFont("Helvetica-Bold", 8)
-        pdf.drawString(28*mm, ty, f"Maximale Ersparnis: {labels[mx_idx]}"); ty -= 5*mm
-        pdf.setFillColor(C_WHITE); pdf.setFont("Helvetica", 7.5)
-        pdf.drawString(28*mm, ty, f"+{fmt(mc['profit_25'])} EUR Gewinn \u2014 {fmt(delta)} EUR mehr als {labels[pl_idx]}."); ty -= 4.5*mm
-        fit_note = f" Einspeiseverg. {mc['feed_in_tariff']*100:.2f} ct/kWh." if mc['feed_in_tariff'] > 0 else ""
-        pdf.drawString(28*mm, ty, f"{mc['autarky']}% Autarkie, Amortisation in {mc['amort']} J.{fit_note}")
 
-    y -= rh+10*mm; cta_h = 26*mm
+    # ── Was kostet Nicht-Handeln? ──
+    y -= rh+6*mm; opp_h = 34*mm
+    # Calculate 25-year electricity cost without PV
+    cost_no_pv_25 = sum(
+        customer["consumption"] * electricity_price * (1 + price_increase) ** (yr - 1)
+        for yr in range(1, 26)
+    )
+    # With PV (P/L winner): remaining grid cost + invest - cumulative savings already captured in cum_25
+    cost_with_pv_25 = cost_no_pv_25 - pc["cum_25"] + pc["cost"]
+    saved_total = cost_no_pv_25 - cost_with_pv_25
+
+    rrect(pdf, 20*mm, y-opp_h, W-40*mm, opp_h, 4*mm, HexColor("#FFF7ED"), HexColor("#F59E0B"))
+    pdf.setFillColor(C_DARK); pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(26*mm, y-7*mm, "Was kostet es, nicht zu handeln?")
+    pdf.setFillColor(C_DARK); pdf.setFont("Helvetica", 7.5)
+    pdf.drawString(26*mm, y-14*mm,
+        f"Ohne Solaranlage zahlen Sie in 25 Jahren voraussichtlich {fmt(round(cost_no_pv_25))} EUR Stromkosten")
+    pdf.drawString(26*mm, y-19.5*mm,
+        f"(bei {price_increase*100:.1f}% j\xe4hrlicher Strompreissteigerung, historischer Durchschnitt DE).")
+    pdf.setFillColor(C_PRIMARY); pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(26*mm, y-27*mm,
+        f"Mit {labels[rec_idx]} sparen Sie {fmt(round(pc['cum_25']))} EUR an Stromkosten — bei nur {fmt(pc['cost'])} EUR Investition.")
+    pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica", 6.5)
+    pdf.drawString(26*mm, y-32*mm,
+        f"Jedes Jahr ohne PV kostet Sie im Durchschnitt {fmt(round(cost_no_pv_25/25))} EUR an Ihren Stromanbieter.")
+
+    y -= opp_h+6*mm; cta_h = 26*mm
     rrect(pdf, 20*mm, y-cta_h, W-40*mm, cta_h, 4*mm, C_BG_ACCENT, C_ACCENT_DARK)
     pdf.setFillColor(C_DARK); pdf.setFont("Helvetica-Bold", 11)
     pdf.drawString(28*mm, y-8*mm, "Bereit f\xfcr Ihre Solaranlage?")
@@ -591,8 +689,8 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
 
     y -= cta_h+6*mm; pdf.setFillColor(C_GRAY); pdf.setFont("Helvetica", 5)
     for line in [
-        f"Simulation, keine Ertragsprognose. Bifazialmodule, PR 95% (2% Kabel, 3% Verschmutzung). Abweichungen m\xf6glich.",
-        f"Strompreissteigerung {price_increase*100:.1f}% p.a. = Inflationsdurchschnitt DE. EEG-Verg\xfctung f\xfcr registrierte Anlagen >2 kWp.",
+        f"Simulation, keine Ertragsprognose. Bifazialmodule, PR 96,5% (1% Kabel, 2,5% Verschmutzung). Abweichungen m\xf6glich.",
+        f"Strompreissteigerung {price_increase*100:.1f}% p.a. = historischer Durchschnitt DE (2010–2024). EEG-Verg\xfctung f\xfcr registrierte Anlagen >2 kWp.",
         "Preise inkl. MwSt. (0% PV gem. UStG). Freibleibend.",
     ]:
         pdf.drawString(20*mm, y, line); y -= 3*mm
@@ -601,8 +699,8 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
 
     # ─── DEBUG ───────────────────────────────────────────────────────
     print(f"\n{'='*70}")
-    print(f"SOLAR-BERICHT v5 \u2014 {customer['name']}, {customer['consumption']} kWh, {ml}")
-    print(f"Bifazial +{(bifacial_gain-1)*100:.0f}%, PR 95%, FIT: {vergutung_hint}")
+    print(f"SOLAR-BERICHT v5 — {customer['name']}, {customer['consumption']} kWh, {ml}")
+    print(f"Bifazial +{(bifacial_gain-1)*100:.0f}%, PR 96,5%, FIT: {vergutung_hint}")
     print(f"Ausgew\xe4hlt: {', '.join(labels)}")
     print(f"{'='*70}")
     for i, cfg in enumerate(configs):
@@ -614,8 +712,9 @@ def generate_report(customer, montage="Schraegdach", report_type="dach", out_pat
         bal = cfg['self_ac']+cfg['grid_ac']
         print(f"  Bilanz:          {bal} vs {customer['consumption']}  {'OK' if abs(bal-customer['consumption'])<5 else 'FAIL'}")
         print(f"  Ersparnis \xd8/J:  {cfg['avg_savings_25']} EUR  |  Amort: {cfg['amort']} J.  |  Gewinn 25J: +{fmt(cfg['profit_25'])} EUR")
-    print(f"\n  P/L-Sieger:     {labels[pl_idx]}")
-    if show_max: print(f"  Max-Ersparnis:  {labels[mx_idx]} (+{fmt(profits[mx_idx]-profits[pl_idx])} EUR)")
+    print(f"\n  Empfehlung:      {labels[rec_idx]}")
+    if rec_idx != pl_idx:
+        print(f"  (Upgrade von {labels[pl_idx]}: +{fmt(profits[rec_idx]-profits[pl_idx])} EUR Mehrersparnis)")
     return out
 
 
@@ -633,4 +732,4 @@ if __name__ == "__main__":
     print("\n\n--- SELECTION TEST ---")
     for cons in [1500, 2000, 2500, 3000, 4000, 5000]:
         sel = select_packages(cons)
-        print(f"  {cons:5d} kWh \u2192 {sel}")
+        print(f"  {cons:5d} kWh → {sel}")
