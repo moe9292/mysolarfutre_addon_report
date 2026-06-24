@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 mySolarFuture - Web-Berechnung: Upgrade-Bericht (4 -> 6/8 Module)
-Streamlit-App als Eingabe-Oberflaeche fuer generate_upgrade_report().
-Start lokal:  streamlit run upgrade_app.py
+Seite "Upgrade" im gemeinsamen Rechentool. Eingabe-Oberflaeche fuer generate_upgrade_report().
+Start lokal:  streamlit run app.py
 """
 import base64
 import tempfile

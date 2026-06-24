@@ -357,7 +357,7 @@ def draw_amort(c, x, y, w, h, configs, labels, colors):
 
 # ═══════════════════════════════════════════════════════════════════════
 
-def generate_report(customer, montage="Schraegdach", report_type="dach"):
+def generate_report(customer, montage="Schraegdach", report_type="dach", out_path="solar_bericht_v5.pdf"):
     """
     customer: dict with name, street, city, consumption, orientation
     montage: "Schraegdach" | "Flachdach" | "Balkon"
@@ -426,7 +426,7 @@ def generate_report(customer, montage="Schraegdach", report_type="dach"):
     vergutung_hint = "  \xb7  ".join(vergutung_parts)
 
     # ─── PDF ─────────────────────────────────────────────────────────
-    out = "/home/claude/solar_bericht_v5.pdf"
+    out = out_path
     pdf = canvas.Canvas(out, pagesize=A4)
     tp = 3
 
